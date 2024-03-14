@@ -1,0 +1,148 @@
+name: THOR [Simplex] 250
+target_size: &target_size !!python/tuple [128, 128]
+train_batch_size: &tbatch_size 16
+downstream_batch_size: &dbatch_size 1
+checkpoint_path: &checkpoint_path './weights/thor/thor/'
+#
+# Experiment
+#
+experiment:
+  name: THOR
+  task: train # test
+  weights: 
+  # weights: PATH_TO_MODEL/best_model.pt' # 1500 Simplex
+
+device: gpu
+configurator:
+  module_name: core.Configurator
+  class_name: DLConfigurator
+  params:
+#
+# Model
+#
+model:
+  module_name: model_zoo.ddpm
+  class_name: DDPM
+  params:
+    spatial_dims: 2
+    in_channels: 1
+    out_channels: 1
+    num_channels: 
+      - 128
+      - 256
+      - 256
+    attention_levels:
+      - False
+      - True
+      - True
+    num_res_blocks: 1
+    num_head_channels: 256
+
+    # Scheduling and noising scheme
+    train_scheduler: "ddpm"
+    inference_scheduler: "ddpm"
+    inference_steps: 1000
+    noise_level_recon: 250 # 400
+    noise_level_inpaint: 50
+    noise_type: "simplex" # Change to 'simplex' for Simplex noise
+    prediction_type: "epsilon"
+    inference_type: 'thor'
+    t_harmonization: 
+      - 200
+      - 150
+      - 100
+      - 50
+
+#
+# Trainer
+#
+trainer:
+  module_name: projects.thor.DDPMTrainer
+  class_name: PTrainer
+  params:
+    input_size: *target_size
+    checkpoint_path: *checkpoint_path
+    batch_size: *tbatch_size
+    nr_epochs: 1500
+    patience: 1500
+    val_interval: 50
+    # Loss
+    loss:
+      module_name: optim.losses.ln_losses
+      class_name: L2
+      params:
+    optimizer_params:
+      lr: 1.0e-4
+  # Data Loader
+  data_loader:
+    # IXI-T1
+    module_name: core.DataLoader
+    class_name: DefaultDataLoader
+    params:
+      args:
+        target_size: *target_size
+        batch_size: *tbatch_size
+        dataset_module:
+          module_name: data.loaders.brain_loader
+          class_name: BrainLoader
+        data_dir:
+          train:
+            - './data/CAPS_IXI/splits/ixi-t1_atlas_train_2D.csv'
+          val:
+            - './data/CAPS_IXI/splits/ixi-t1_val_2D.csv'
+          test:
+            - './data/CAPS_IXI/splits/ixi-t1_test_2D.csv'
+
+# Downstream tasks
+downstream_tasks:
+######
+# EVALUATE ON HEALTHY AND SEARCH FOR THRESHOLD / OPERATING POINT
+######
+  # healthy_baseline:
+  #   ### CHANGE task to 'thresholding' to search for a threshold for localization
+  #   ### CHANGE task to 'RQI' to compute the RQI values
+  #   ### CHANGE task to 'AHI_UNN' and normal_path to the path of normal training images to compute the AHI_UN;N values
+  #   module_name: projects.thor.DownstreamEvaluatorAtlas
+  #   class_name: PDownstreamEvaluator
+  #   checkpoint_path: *checkpoint_path
+  #   data_loader:
+  #     module_name: core.DataLoader
+  #     class_name: DefaultDataLoader
+  #     params:
+  #       args:
+  #         target_size: *target_size
+  #         batch_size: *dbatch_size
+  #         dataset_module:
+  #           module_name: data.loaders.brain_loader
+  #           class_name: BrainLoader
+  #     datasets:
+  #       Normal_brain:
+  #         data_dir:
+  #           test:
+  #             - './data/fastMRI/splits/normal_test.csv'
+######
+# ATLAS STROKE DETECTION
+#####
+ detection:
+   module_name: projects.thor.DownstreamEvaluatorAtlas
+   class_name: PDownstreamEvaluator
+   checkpoint_path: *checkpoint_path
+   global_detection: True
+   data_loader:
+     module_name: core.DataLoader
+     class_name: DefaultDataLoader
+     params:
+       args:
+         target_size: *target_size
+         batch_size: *dbatch_size
+         dataset_module:
+           module_name: data.loaders.brain_loader
+           class_name: BrainLoader
+     datasets:
+       Atlas:
+         data_dir:
+           test:
+             - './data/ATLAS/splits/atlas_train_png.csv'
+         label_dir:
+           test:
+             - './data/ATLAS/splits/atlas_train_mask_png.csv'
