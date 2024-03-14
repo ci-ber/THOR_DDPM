@@ -50,33 +50,20 @@ The code is based on the deep learning framework from the Institute of Machine L
 <img src="https://github.com/ci-ber/THOR_DDPM/assets/106509806/87c17548-fd15-4c9d-80cf-ecaa11cc7f61">
 </p>
 
-#### 1). Set up wandb (https://docs.wandb.ai/quickstart)
-
-Sign up for a free account and login to your wandb account.
-```bash
-wandb login
-```
-Paste the API key from https://wandb.ai/authorize when prompted.
-
-#### 2). Clone repository
+#### 1). Clone repository
 
 ```bash
 git clone https://github.com/ci-ber/THOR_DDPM.git
 cd THOR_DDPM
 ```
 
-#### 3). Install requirements
+#### 2). Install PyTorch 
+
 *Optional* create virtual env:
 ```bash
 conda create --name thor python=3.8.0
 conda activate thor
 ```
-
-```bash
-pip install -r pip_requirements.txt
-```
-
-#### 4). Install PyTorch 
 
 > Example installation: 
 * *with cuda*: 
@@ -87,6 +74,20 @@ pip3 install torch==1.9.1+cu111 torchvision==0.10.1+cu111 -f https://download.py
 ```
 pip3 install torch==1.9.1 torchvision==0.10.1 -f https://download.pytorch.org/whl/torch_stable.html
 ```
+
+#### 3). Install requirements
+
+```bash
+pip install -r pip_requirements.txt
+```
+
+#### 4). Set up wandb (https://docs.wandb.ai/quickstart)
+
+Sign up for a free account and login to your wandb account.
+```bash
+wandb login
+```
+Paste the API key from https://wandb.ai/authorize when prompted.
 
 #### 5). Download datasets 
 
