@@ -18,6 +18,9 @@ Diffusion Models with Implicit Guidance for Medical Anomaly Detection
 <h4 align="center">Official repository of the paper</h4>
 <a href="https://arxiv.org/pdf/2403.08464.pdf">Preprint</a> </h4>
 
+<p align="center">
+<img src="https://github.com/ci-ber/THOR_DDPM/assets/106509806/09f646e7-944a-4be1-bf15-d067c72954b8">
+</p>
 
 ## Citation
 
