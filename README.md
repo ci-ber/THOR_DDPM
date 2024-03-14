@@ -107,6 +107,6 @@ Run the main script with the corresponding config like this:
 python core/Main.py --config_path ./projects/thor/configs/brain/thor.yaml
 ```
 
-Refer to the thor.yaml for the default configuration. Store the pre-trained model from <a href="https://www.dropbox.com/s/ooq7vdp9fp4ufag/latest_model.pt.zip?dl=0"> HERE</a> into the specified directory to skip the training part.
+Refer to the thor.yaml for the default configuration.
 
 # That's it, enjoy! :rocket:
