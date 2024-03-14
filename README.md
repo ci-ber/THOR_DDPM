@@ -87,7 +87,7 @@ pip3 install torch==1.9.1 torchvision==0.10.1 -f https://download.pytorch.org/wh
 
 #### 5). Download datasets 
 
-<h4 align="center"><a href="https://brain-development.org/ixi-dataset/">IXI</a> • <a href="https://fcon_1000.projects.nitrc.org/indi/retro/atlas.html">Atlas (Stroke) </a> </h4> • <a href="https://figshare.com/articles/dataset/GRAZPEDWRI-DX/14825193">Pediatric Wrist X-ray </a> </h4>
+<h4 align="center"><a href="https://brain-development.org/ixi-dataset/">IXI</a> • <a href="https://fcon_1000.projects.nitrc.org/indi/retro/atlas.html">Atlas (Stroke) </a> • <a href="https://figshare.com/articles/dataset/GRAZPEDWRI-DX/14825193">Pediatric Wrist X-ray </a> </h4>
 
 > Move the datasets to the target locations. You can find detailed information about the expected files and locations in the corresponding *.csv files under data/$DATASET/splits.
 
