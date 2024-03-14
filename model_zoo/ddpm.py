@@ -18,8 +18,6 @@ from net_utils.nets.diffusion_unet import DiffusionModelUNet
 from net_utils.schedulers.ddpm import DDPMScheduler
 from net_utils.schedulers.ddim import DDIMScheduler
 
-from optim.losses.monai_perceptual_loss import PerceptualLoss
-
 import wandb
 import logging
 import matplotlib
@@ -91,7 +89,6 @@ class DDPM(nn.Module):
 
         # LPIPS for perceptual anomaly maps
         self.l_pips_sq = lpips.LPIPS(pretrained=True, pnet_rand=False, net='squeeze', eval_mode=True, spatial=True, lpips=True).to(self.device)
-        self.l_pips_monai = PerceptualLoss(2, 'radimagenet_resnet50').to(self.device)
 
         # set up scheduler and timesteps
         if train_scheduler == "ddim":
