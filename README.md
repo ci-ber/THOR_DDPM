@@ -25,10 +25,9 @@ If you find our work useful, please cite our paper:
 ```
 @misc{Bercea2024diffusion,
     title={Diffusion Models with Implicit Guidance for Medical Anomaly Detection},
-    howpublished = "\url{https://synthical.com/article/84830c75-a18c-46bc-a5cf-89d98d86c673}",
-    author={Cosmin I. Bercea and Benedikt Wiestler and Daniel Rueckert},
+    author={Cosmin I. Bercea and Benedikt Wiestler and Daniel Rueckert and Julia Schnabel},
     year={2024},
-    month={2},
+    month={3},
     eprint={2403.08464},
     archivePrefix={arXiv},
     primaryClass={cs.CV}
