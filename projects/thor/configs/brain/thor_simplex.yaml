@@ -43,7 +43,6 @@ model:
     inference_scheduler: "ddpm"
     inference_steps: 1000
     noise_level_recon: 250 # 400
-    noise_level_inpaint: 50
     noise_type: "simplex" # Change to 'simplex' for Simplex noise
     prediction_type: "epsilon"
     inference_type: 'thor'
