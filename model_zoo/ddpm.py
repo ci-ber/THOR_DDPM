@@ -3,8 +3,7 @@
 # Implements two different methods:
 #   1). AnoDDPM: Wyatt et.: Anoddpm: "Anomaly detection with denoising diffusion probabilistic models using simplex
 # noise." Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops 650–656535, (2022).
-#   2) AutoDDPM: CI Bercea et. al.: "Mask, stitch, and re-sample: Enhancing robustness and generalizability in
-#   anomaly detection through automatic diffusion models." ICML Workshops, (2023).
+#   2) THOR: CI Bercea et. al.: "Diffusion Models with Implicit Guidance for Medical Anomaly Detection", arxiv, (2024).
 from __future__ import annotations
 
 import math
