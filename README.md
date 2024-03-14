@@ -95,9 +95,9 @@ Paste the API key from https://wandb.ai/authorize when prompted.
 
 > Move the datasets to the target locations. You can find detailed information about the expected files and locations in the corresponding *.csv files under data/$DATASET/splits.
 
-> *Alternatively you can use your own mid-axial slices of T1w brain scans with our pre-trained weights for <a href="https://www.dropbox.com/scl/fi/55cl3821vw1jp3jim2da2/brain_Gaussian.pt?rlkey=pz99o0x3g6vi3siwtvfpb0oyo&dl=0"> Gaussian noise</a> or <a href="https://www.dropbox.com/scl/fi/d8olm81iynd4lbsjt0fgm/brain_Simplex.pt?rlkey=onmyjogb3ej7uibs7r4poy4w8&dl=0"> Simplex noise</a> or train from scratch on other anatomies and modalities.*
+> *Alternatively you can use your own mid-axial slices of T1w brain scans with our pre-trained weights for <a href="https://www.dropbox.com/scl/fi/55cl3821vw1jp3jim2da2/brain_Gaussian.pt?rlkey=pz99o0x3g6vi3siwtvfpb0oyo&dl=1"> Gaussian noise</a> or <a href="https://www.dropbox.com/scl/fi/d8olm81iynd4lbsjt0fgm/brain_Simplex.pt?rlkey=onmyjogb3ej7uibs7r4poy4w8&dl=1"> Simplex noise</a> or train from scratch on other anatomies and modalities.*
 
-> * For pediatric wrist X-rays you can use our pre-trained weights for <a href="https://www.dropbox.com/scl/fi/dd0zzzjcimmw3egcfvhvu/wxr_Gaussian.pt?rlkey=iovq4hx9zcmlogszhg19d9ou2&dl=0"> Gaussian noise</a> or <a href="https://www.dropbox.com/scl/fi/0aeiawcih2io4imdo169f/wxr_Simplex.pt?rlkey=grn8t62nsn0ojo6rc378gemvt&dl=0"> Simplex noise</a>. 
+> * For pediatric wrist X-rays you can use our pre-trained weights for <a href="https://www.dropbox.com/scl/fi/dd0zzzjcimmw3egcfvhvu/wxr_Gaussian.pt?rlkey=iovq4hx9zcmlogszhg19d9ou2&dl=1"> Gaussian noise</a> or <a href="https://www.dropbox.com/scl/fi/0aeiawcih2io4imdo169f/wxr_Simplex.pt?rlkey=grn8t62nsn0ojo6rc378gemvt&dl=1"> Simplex noise</a>. 
 
 #### 6). Run the pipeline
 
