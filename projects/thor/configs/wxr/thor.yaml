@@ -1,4 +1,4 @@
-name: THOR [Gaussan] AD 350
+name: THOR [Gaussian] AD 350
 target_size: &target_size !!python/tuple [128, 128]
 train_batch_size: &tbatch_size 16
 downstream_batch_size: &dbatch_size 1
@@ -9,7 +9,7 @@ checkpoint_path: &checkpoint_path './weights/thor/thor/'
 experiment:
   name: THOR-WXR
   task: train # test
-  weights: #'.PATH_TO_WEIGHTS/latest_model.pt' # GAUSSIAN
+  weights: #'.PATH_TO_WEIGHTS/latest_model.pt' # Simplex 
 
 device: gpu
 configurator:
@@ -41,8 +41,7 @@ model:
     train_scheduler: "ddpm"
     inference_scheduler: "ddpm"
     inference_steps: 1000
-    noise_level_recon: 400 # 400
-    noise_level_inpaint: 50
+    noise_level_recon: 350 # 400
     noise_type: "gaussian" # Change to 'simplex' for Simplex noise
     prediction_type: "epsilon"
     inference_type: "thor"
@@ -188,13 +187,13 @@ downstream_tasks:
           mask_dir:
             test:
               - './data/wrist/splits/softtissue_neg.csv'
-       text:
-         data_dir:
-           test:
-             - './data/wrist/splits/text.csv'
-         label_dir:
-           test:
-             - './data/wrist/splits/text_ann.csv'
-         mask_dir:
-           test:
-             - './data/wrist/splits/text_neg.csv'
+      # #  text:
+      #    data_dir:
+      #      test:
+      #        - './data/wrist/splits/text.csv'
+      #    label_dir:
+      #      test:
+      #        - './data/wrist/splits/text_ann.csv'
+      #    mask_dir:
+      #      test:
+      #        - './data/wrist/splits/text_neg.csv'

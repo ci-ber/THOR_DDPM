@@ -1,12 +1,15 @@
 import numpy as np
 import torch
+import PIL
+# Reads a file using pillow
 from monai.transforms import Transform
 from monai.utils.enums import TransformBackends
 from monai.config.type_definitions import NdarrayOrTensor
 import torchvision
 import torchvision.transforms.functional as transform
+from torchvision.io.image import read_image
 import torch.nn.functional as F
-import PIL
+import torchio
 
 
 class ReadImage(Transform):
@@ -26,17 +29,29 @@ class ReadImage(Transform):
             img = (img * 255).astype(np.uint8)
             return torch.tensor(img)
         elif '.jpeg' in path or '.jpg' in path or '.png' in path:
-            PIL_image = PIL.Image.open(path)
+            PIL_image = PIL.Image.open(path)#.convert('L')
+            # The image can be converted to tensor using
             tensor_image = torch.squeeze(transform.to_tensor(PIL_image))
-            return tensor_image
+            # print(f'Read:: Min: {torch.min(tensor_image)}, Max: {torch.max(tensor_image)}, Avg: '
+            #       f'{torch.mean(tensor_image)}')
+
+            # print(tensor_image.cpu().numpy().shape)
+            return tensor_image#read_image(path)
         elif '.nii.gz' in path:
             import nibabel as nip
             from nibabel.imageglobals import LoggingOutputSuppressor
             with LoggingOutputSuppressor():
                 img_obj = nip.load(path)
                 img_np = np.array(img_obj.get_fdata(), dtype=np.float32)
-                img_t = torch.Tensor(img_np.copy())
+                # img_t = torch.Tensor(img_np.copy())
+                img_t = torch.Tensor(img_np[:, :, :].copy()) # Transposed 3D MRI brains
+                # img_t = torch.Tensor(np.flipud(img_np[:, :, :].T).copy()) # Transposed 3D MRI brains
                 # img_t = torch.Tensor(np.flipud(img_np[:, :, 95].T).copy()) # Mid Axial slice of MRI brains
+            # TODO: THIS IS TEMPORARY FI IT
+            # if img_t.shape[2] > 1:
+            #     mid_slice = int(img_t.shape[2]/2)
+            #     img_t = img_t[:,:,mid_slice:mid_slice+1]
+            #     img_t = img_t.permute(2,0,1)
             return img_t
         elif '.nii' in path:
             import nibabel as nip
@@ -56,9 +71,10 @@ class ReadImage(Transform):
             raise IOError
 
 
+
 class Norm98:
-    def __init__(self, max_val=255.0):
-        self.max_val = max_val
+    def __init__(self, cut_off=1.0):
+        self.cut_off = cut_off
         super(Norm98, self).__init__()
 
     def __call__(self, img):
@@ -67,10 +83,12 @@ class Norm98:
         """
         # print(torch.min(img), torch.max(img))
         # print(img.shape)
-        q = np.percentile(img, 98)
+        # print(f'norm98:: Min: {torch.min(img)}, Max: {torch.max(img)}, Avg: {torch.mean(img)}')
+
+        img[img>self.cut_off] = torch.min(img)
+        q = np.quantile(img, 0.98)
         img = img / q
         img[img > 1] = 1
-        # return img/self.max_val
         return img
 
 
@@ -87,13 +105,18 @@ class To01:
         """
         Apply the transform to `img`.
         """
+        # print(torch.max(img))
+        # print(f'To01:: Min: {torch.min(img)}, Max: {torch.max(img)}, Avf: {torch.mean(img)}')
+        # print(f'Input image shape: {img.shape}')
+        # print(f'Max_val  {self.max_val}:: Min: {torch.min(img)}, Max: {torch.max(img)}, Avg: {torch.mean(img)}')
         if torch.max(img) <= 1.0:
             # print(img.cpu().numpy().shape)
             return img
         # print(img.cpu().numpy().shape)
         if torch.max(img) <= 255.0:
-            return img/255
+            return img / 255
 
+        # return img / torch.max(img)
         return img / 65536
 
 
@@ -157,6 +180,8 @@ class AddChannelIfNeeded(Transform):
     """
     Adds a 1-length channel dimension to the input image, if input is 2D
     """
+    def __init__(self, dim=2):
+        self.dim=dim
 
     backend = [TransformBackends.TORCH, TransformBackends.NUMPY]
 
@@ -164,8 +189,7 @@ class AddChannelIfNeeded(Transform):
         """
         Apply the transform to `img`.
         """
-        if len(img.shape) == 2:
-            # print(f'Added channel: {(img[None,...].shape)}')
+        if (self.dim == 2 and len(img.shape) == 2) or (self.dim == 3 and len(img.shape) == 3):
             return img[None, ...]
         else:
             return img
@@ -182,13 +206,17 @@ class AssertChannelFirst(Transform):
         """
         Apply the transform to `img`.
         """
+        # print(torch.min(img), torch.max(img))
+        # print(f'AssertCH:: Min: {torch.min(img)}, Max: {torch.max(img)}, Avg: {torch.mean(img)}')
         assert len(img.shape) == 3,  f'AssertChannelFirst:: Image should have 3 dimensions, instead of {len(img.shape)}'
         if img.shape[0] == img.shape[1] and img.shape[0] != img.shape[2]:
             print(f'Permuted channels {(img.permute(2,0,1)).shape}')
             return img.permute(2, 0, 1)
         elif img.shape[0] > 1:
+            # print(img.shape)
             return img[0: 1, :, :]
         else:
+            # print(img.shape)
             return img
 
 
@@ -214,20 +242,47 @@ class Pad(Transform):
     Pad with zeros
     """
     backend = [TransformBackends.TORCH, TransformBackends.NUMPY]
-    def __init__(self, pid= (1,1)):
+    def __init__(self, pid= (1,1), type='center'):
         self.pid = pid
+        self.type = type
 
     def __call__(self, img: NdarrayOrTensor) -> NdarrayOrTensor:
         img = torch.squeeze(img)
         max_dim = max(img.shape[0], img.shape[1])
+        z = 0
+        if len(img.shape) > 2:
+            max_dim = max(max_dim, img.shape[2])
+            z = max_dim - img.shape[2]
+
         x = max_dim - img.shape[0]
         y = max_dim - img.shape[1]
-
-        self.pid = (int(y/2), y-int(y/2), int(x/2), x-int(x/2))
+        if self.type == 'center':
+            self.pid = (int(z/2), z-int(z/2), int(y/2), y-int(y/2), int(x/2), x-int(x/2)) if len(img.shape) > 2\
+                else (int(y / 2), y - int(y / 2), int(x / 2), x - int(x / 2))
+        elif self.type == 'end':
+            self.pid = (z, 0, y, 0, x, 0) if len(img.shape) > 2 else (y, 0, x, 0)
+        else:
+            self.pid = (0, z, 0, y, 0, x) if len(img.shape) > 2 else (0, y, 0, x)
         pad_val = torch.min(img)
+        # self.pid = (3,3,0,0,0,0)
         img_pad = F.pad(img, self.pid, 'constant', pad_val)
+        # img_pad[img_pad > 0.95] = pad_val
+        # print(f'PadAmount:: X: {x}, Y: {y}, Z: {z}')
+
+        # print(f'PadBefore:: Min: {torch.min(img)}, Max: {torch.max(img)}, Avf: {torch.mean(img)}')
+        # print(f'PadAfter:: Min: {torch.min(img_pad)}, Max: {torch.max(img_pad)}, Avf: {torch.mean(img_pad)}')
+
 
         return img_pad
+
+class Resize3D(Transform):
+    def __init__(self, target_size):
+        self.target_size = target_size
+    def __call__(self, img: NdarrayOrTensor) -> NdarrayOrTensor:
+        # print(img.shape)
+        # self.target_size = int(img.shape // 2)
+        self.resize = torchio.transforms.Resize(self.target_size)
+        return self.resize(img)
 
 
 class Zoom(Transform):
