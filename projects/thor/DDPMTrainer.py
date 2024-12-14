@@ -30,9 +30,15 @@ class PTrainer(Trainer):
             self.model.state_dict():
         """
         if model_state is not None:
-            self.model.load_state_dict(model_state)  # load weights
+            self.model.load_state_dict(model_state, strict=False)  # load weights
+            logging.info("[Trainer::weights]: ################ Model weights loaded ################")
+        else: 
+            logging.info("[Trainer::weights]: ################ No model weights were loaded ################")
         if opt_state is not None:
-            self.optimizer.load_state_dict(opt_state)  # load optimizer
+            try: 
+                self.optimizer.load_state_dict(opt_state, strict=False)  # load optimizer
+            except: 
+                logging.warning("[Trainer::weights]: ################ Optimizer state could not be loaded ################")
 
         epoch_losses = []
 
