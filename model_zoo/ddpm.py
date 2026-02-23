@@ -141,7 +141,11 @@ class DDPM(nn.Module):
         # combined_mask = self.dilate_masks(combined_mask)
         combined_mask2 = torch.Tensor(combined_mask_np2).to(self.device)
 
-        combined_mask = (combined_mask / (torch.max(combined_mask) + 1e-8)).clip(0,1) 
+        # combined_mask = (combined_mask / (torch.max(combined_mask) + 1e-8)).clip(0,1) 
+        # compute max value per image and normalize by it
+        max_val = combined_mask.amax(dim=(1,2,3), keepdim=True)
+        combined_mask = (combined_mask / (max_val + 1e-8)).clamp(0,1)
+        
         # x_res_neg = (x-x_rec)
         return combined_mask, combined_mask2, torch.Tensor(x_res).to(self.device)
         # return torch.Tensor(x_res).to(self.device), torch.Tensor(x_res).to(self.device), torch.Tensor(x_res).to(self.device)
