@@ -77,11 +77,12 @@ class PTrainer(Trainer):
                     
                     # Get model prediction
                     pred = self.model(inputs=transformed_images, noise=noise, timesteps=timesteps)
-                    pred = (pred + 1) / 2
                     transformed_images = (transformed_images + 1) / 2
                     images = (images + 1) / 2 
 
+                    # cases for prediction_type = 'sample' or 'epsilon'
                     target = transformed_images if self.model.prediction_type == 'sample' else noise
+                    pred = (pred + 1) / 2 if self.model.prediction_type == 'sample' else pred
                     loss = self.criterion_rec(pred.float(), target.float())
 
                 scaler.scale(loss).backward()
