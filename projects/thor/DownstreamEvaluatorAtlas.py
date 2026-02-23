@@ -16,14 +16,17 @@ import seaborn as sns
 from torch.nn import L1Loss
 from torch.cuda.amp import autocast
 from torchvision.transforms import transforms
-from torchvision.utils import save_image
+from torchvision.utils import save_image, make_grid
 import torch.nn.functional as F
+from torch.nn import MSELoss
+from optim.losses import PerceptualLoss
 
 #
 from skimage.metrics import structural_similarity as ssim
 from pytorch_msssim import ssim as ssim2
 from skimage import exposure
 from scipy.ndimage.filters import gaussian_filter
+from net_utils.simplex_noise import generate_noise, generate_simplex_noise
 
 from PIL import Image
 import cv2
@@ -41,6 +44,7 @@ from model_zoo.vgg import VGGEncoder
 from optim.losses.image_losses import CosineSimLoss
 
 
+
 class PDownstreamEvaluator(DownstreamEvaluator):
     """
     Federated Downstream Tasks
@@ -51,11 +55,11 @@ class PDownstreamEvaluator(DownstreamEvaluator):
         super(PDownstreamEvaluator, self).__init__(name, model, device, test_data_dict, checkpoint_path)
 
         self.criterion_rec = L1Loss().to(self.device)
+        self.criterion_MSE = MSELoss().to(device)
+        self.criterion_PL = PerceptualLoss(device=device)
         self.vgg_encoder = VGGEncoder().to(self.device)
         self.l_pips_sq = lpips.LPIPS(pretrained=True, net='squeeze', use_dropout=True, eval_mode=True, spatial=True,
                                      lpips=True).to(self.device)
-        self.l_cos = CosineSimLoss(device='cuda')
-        self.l_ncc = NCC(win=[9, 9])
 
         # 71 - 570 - inf
 
@@ -77,9 +81,265 @@ class PDownstreamEvaluator(DownstreamEvaluator):
         self.pathology_localization(global_model, 3, 71, True)
         self.pathology_localization(global_model, 71, 570, True)
         self.pathology_localization(global_model, 570, 10000, True)
-    
+        
+        # self.noise_images_plotting(global_model)
+        # self.unconditional_sample(global_model)
+        # self.image_reconstruction(global_model)
+        
+        # self.image_reconstruction(global_model)
+        # self.anomaly_detection_intermediates_vis(global_model)
+        
+    def anomaly_detection_intermediates_vis(self, global_model):
+        lpips_alex = lpips.LPIPS(net='alex')
+        self.model.load_state_dict(global_model, strict=False)
+        self.model.eval()
+        
+        task_name = 'Pseudo_Healthy_Visualization'
+        dataset_key = list(self.test_data_dict.keys())[0]
+        image_caption_base = f"{dataset_key}_{str(self.model.inference_scheduler)[:4].lower()}"
+        x_ = (next(iter(self.test_data_dict[dataset_key]))[0]).to(self.device)
+        wandb.define_metric("noise_level")
+        wandb.define_metric("*", step_metric="noise_level")
 
-    def _log_visualization(self, to_visualize, i, count):
+        with torch.no_grad():
+            noise_levels = list(np.arange(0, self.model.train_scheduler.num_train_timesteps, 100))
+            img_recs_list = []
+            img_intermediates_list = []
+            for noise_level_recon in noise_levels:
+                anomaly_map, anomaly_score, x_rec_dict = self.model.get_anomaly(copy.deepcopy(x_), noise_level=noise_level_recon)
+                # x and x_rec comparison 
+                x_rec = x_rec_dict['x_rec'] if 'x_rec' in x_rec_dict.keys() else torch.zeros_like(x)
+                x_rec_ = torch.clamp(x_rec, 0, 1)
+                diff_ = torch.abs(x_ - x_rec_)
+                torch.from_numpy(anomaly_map)
+                anomaly_map = torch.from_numpy(anomaly_map).to(self.device)
+                imag_rec_tovis = torch.stack([x_] + [x_rec_] + [anomaly_map] +[diff_]).permute(1,0,2,3,4) # (B, S, C, H, W)
+                x_labels = ['x', 'x_rec', 'anomaly_map', 'diff']
+                y_labels = ["sample_" + str(i) for i in range(x_.shape[0])]
+                self._batch_visualization(task_name, f"{image_caption_base}_noise_level={noise_level_recon}_pseudo_healthy_samples", x_labels, y_labels, imag_rec_tovis.detach().cpu(), col_cmaps=['gray', 'gray', 'plasma', 'plasma'], col_vmax=[None, None, 0.5, 0.5])
+                img_recs_list.append(x_rec_)
+                # metrics
+                mae_list = []
+                pl_list = []
+                ssim_list = []
+                for i in range(x_.shape[0]):
+                    mae = torch.mean(torch.abs(x_rec_[i] - x_[i])).detach().cpu().numpy()
+                    pl = np.squeeze(lpips_alex(x_rec_[i].cpu(), x_[i].cpu())).detach()
+                    ssim_ = ssim(x_rec_[i].squeeze(0).cpu().numpy(), x_[i].squeeze(0).cpu().numpy(), data_range=1.)
+                    mae_list.append(mae.item())
+                    pl_list.append(pl.item())
+                    ssim_list.append(ssim_.item())
+                wandb.log(
+                    {   
+                        "noise_level": noise_level_recon,
+                        f"{task_name}_metrics/mae": np.mean(mae_list),
+                        f"{task_name}_metrics/pl": np.mean(pl_list),
+                        f"{task_name}_metrics/ssim": np.mean(ssim_list)
+                    }
+                )
+            img_recs_tovis = torch.stack([x_] + img_recs_list).permute(1,0,2,3,4) # (B, S, C, H, W)
+            x_labels = ['x'] + [f'x_rec_{i}' for i in noise_levels]
+            y_labels = ["sample_" + str(i) for i in range(x_.shape[0])]
+            self._batch_visualization(task_name, f"{image_caption_base}_pseudo_healthy_samples", x_labels, y_labels, img_recs_tovis.detach().cpu())                          
+
+                
+    def image_reconstruction(self, global_model):
+        lpips_alex = lpips.LPIPS(net='alex')
+        self.model.load_state_dict(global_model, strict=False)
+        self.model.eval()
+        
+        dataset_key = list(self.test_data_dict.keys())[0]
+        x_ = (next(iter(self.test_data_dict[dataset_key]))[0]).to(self.device)
+        x = (x_ * 2) - 1
+        task_name = 'Image_Reconstruction'
+        image_caption_base = f"{dataset_key}_{str(self.model.inference_scheduler)[:4].lower()}"
+        wandb.define_metric("noise_level")
+        wandb.define_metric("*", step_metric="noise_level")
+
+        with torch.no_grad():
+            noise_levels = list(np.arange(0, self.model.train_scheduler.num_train_timesteps, 100))
+            img_recs_list = []
+            img_intermediates_list = []
+            for noise_level_recon in noise_levels:
+                x_rec, intermediates = self.model.sample_from_image(x, noise_level=noise_level_recon, save_intermediates=True, intermediate_steps=100)
+                # x and x_rec comparison 
+                x_rec_ = (x_rec + 1) / 2
+                x_rec_ = torch.clamp(x_rec_, 0, 1)
+                diff_ = torch.abs(x_ - x_rec_)
+                imag_rec_tovis = torch.stack([x_] + [x_rec_] + [diff_]).permute(1,0,2,3,4) # (B, S, C, H, W)
+                x_labels = ['x', 'x_rec', 'diff']
+                y_labels = ["sample_" + str(i) for i in range(x.shape[0])]
+                self._batch_visualization(task_name, f"{image_caption_base}_noise_level={noise_level_recon}_samples", x_labels, y_labels, imag_rec_tovis.detach().cpu(), col_cmaps=['gray', 'gray', 'plasma'], col_vmax=[None, None, 0.5])
+                img_recs_list.append(x_rec_)
+                # metrics
+                mae_list = []
+                pl_list = []
+                ssim_list = []
+                for i in range(x.shape[0]):
+                    mae = torch.mean(torch.abs(x_rec_[i] - x_[i])).detach().cpu().numpy()
+                    pl = np.squeeze(lpips_alex(x_rec_[i].cpu(), x_[i].cpu())).detach()
+                    ssim_ = ssim(x_rec_[i].squeeze(0).cpu().numpy(), x_[i].squeeze(0).cpu().numpy(), data_range=1.)
+                    mae_list.append(mae.item())
+                    pl_list.append(pl.item())
+                    ssim_list.append(ssim_.item())
+                wandb.log(
+                    {   
+                        "noise_level": noise_level_recon,
+                        f"{task_name}_metrics/mae": np.mean(mae_list),
+                        f"{task_name}_metrics/pl": np.mean(pl_list),
+                        f"{task_name}_metrics/ssim": np.mean(ssim_list)
+                    }
+                )
+                # intermediates plotting
+                intermediates_ = [torch.clamp((intermediate + 1) / 2, 0, 1) for intermediate in intermediates['z']]
+                if len(intermediates_) < 10:
+                    intermediates_ = [torch.zeros_like(intermediates_[0])] * (10 - len(intermediates_)) + intermediates_
+                intermediates_ = torch.stack([x_] + intermediates_ + [x_rec_] + [diff_]) # (T=13, B, C, H, W)
+                img_intermediates_list.append(intermediates_)
+            img_intermediates_ = torch.stack(img_intermediates_list) # (N, T, B, C, H, W) 
+            img_intermediates_ = img_intermediates_.permute(2,0,1,3,4,5) # (B, N, T, C, H, W)
+            for i in range(x.shape[0]):
+                img_intermediates_tovis = img_intermediates_[i] # (N, T, C, H, W)
+                x_labels = ['x'] + [f'step_{noise_level}' for noise_level in reversed(noise_levels)] + ['x_rec', 'diff']
+                y_labels = ["recon_from_" + str(noise_level) for noise_level in noise_levels]
+                col_cmaps=['gray'] * (img_intermediates_tovis.shape[1] - 1) + ['plasma']
+                col_vmax=[None] * (img_intermediates_tovis.shape[1] - 1) + [0.5]
+                self._batch_visualization(task_name, f"{image_caption_base}_intermediates_samples_{i}", x_labels, y_labels, img_intermediates_tovis.detach().cpu(), col_cmaps=col_cmaps, col_vmax=col_vmax)
+            img_recs_tovis = torch.stack([x_] + img_recs_list).permute(1,0,2,3,4) # (B, S, C, H, W)
+            x_labels = ['x'] + [f'x_rec_{i}' for i in noise_levels]
+            y_labels = ["sample_" + str(i) for i in range(x.shape[0])]
+            self._batch_visualization(task_name, f"{image_caption_base}_reconstruction_samples", x_labels, y_labels, img_recs_tovis.detach().cpu())                          
+            
+            
+    def unconditional_sample(self, global_model):
+        task_name = 'Unconditional_Sampling'
+        self.model.load_state_dict(global_model, strict=False)
+        self.model.eval()
+        
+        dataset_key = list(self.test_data_dict.keys())[0]
+        x = (next(iter(self.test_data_dict[dataset_key]))[0]).to(self.device)
+        noise = generate_noise(self.model.train_scheduler.noise_type, x, self.model.inference_scheduler.num_inference_steps)
+        noise_unique = noise[0].unsqueeze(0).repeat(noise.shape[0], 1, 1, 1)
+        self._sample_visualization(task_name, dataset_key, noise, noise_sampling="various_noise")
+        self._sample_visualization(task_name, dataset_key, noise_unique, noise_sampling="same_noise")
+
+    def _sample_visualization(self, task_name, dataset_key, noise, noise_sampling):
+        image_caption_base = f"{dataset_key}_{noise_sampling}_{str(self.model.inference_scheduler)[:4].lower()}"
+
+        with torch.no_grad():
+            # samples plotting
+            samples, intermediates = self.model.sample(input_noise = noise, noise_level=self.model.inference_scheduler.num_inference_steps-1, save_intermediates=True, intermediate_steps=100)
+            samples_ = (samples + 1) / 2
+            samples_ = torch.clamp(samples_, 0, 1)
+            grid = make_grid(samples_, nrow=4, normalize=True, padding=2)[0:1,:,:]
+            wandb.log({f"{task_name}/{image_caption_base}_samples": [wandb.Image(grid, caption=f"{image_caption_base}_samples")]})
+            # intermediates plotting
+            noise_ = (torch.clamp(noise, -3, 3) + 3)/6
+            intermediates_ = [torch.clamp((intermediate + 1) / 2, 0, 1) for intermediate in intermediates]
+            intermediates_ = torch.stack([noise_] + intermediates_ + [samples_]).permute(1,0,2,3,4) # (B, S, C, H, W)
+            x_labels = ['noise'] + [f"step_{i}" for i in reversed(range(0, self.model.inference_scheduler.num_inference_steps, 100))] + ['sample']
+            y_labels = ["sample_" + str(i) for i in range(intermediates_.shape[1])]
+            self._batch_visualization(task_name, f"{image_caption_base}_intermediates", x_labels, y_labels, intermediates_.detach().cpu())
+            
+    def _batch_visualization(self, task_name, image_caption, x_labels, y_labels, batch_images, col_cmaps=None, col_vmax=None, padding=2):
+        B, S, C, H, W = batch_images.shape
+                
+        fig, ax = plt.subplots(figsize=(S*1.2, B))
+        total_W = S * W + (S - 1) * padding
+        total_H = B * H + (B - 1) * padding
+        ax.set_xlim(0, total_W)
+        ax.set_ylim(total_H, 0)
+        # default colormap and vmax for each column
+        if col_cmaps is None:
+            col_cmaps = ['gray'] * S
+        if col_vmax is None:
+            col_vmax = [None] * S
+            
+        # drawing each image block
+        for i in range(B):
+            for j in range(S):
+                block = batch_images[i, j, :, :, :].reshape(H, W)
+                
+                x = j * (W + padding)
+                y = i * (H + padding)
+
+                ax.imshow(
+                    block,
+                    cmap=col_cmaps[j],
+                    vmin=0,
+                    vmax=col_vmax[j],
+                    extent=[x, x+W, y+H, y]
+                )
+        ax.axis('off')
+
+        # column labels
+        for j in range(S):
+            x = j * (W + padding) + W // 2
+            ax.text(
+                x, -5,
+                x_labels[j],
+                ha='center',
+                va='bottom',
+                fontsize=8
+            )
+
+        # row labels
+        for i in range(B):
+            y = i * (H + padding) + H // 2
+            ax.text(
+                -5, y,
+                y_labels[i],
+                ha='right',
+                va='center',
+                fontsize=8
+            )
+
+        plt.tight_layout()
+        plt.show()
+        
+        with io.BytesIO() as buf:
+            plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+            buf.seek(0)
+            img = Image.open(buf)
+            wandb.log({f"{task_name}/{image_caption}": [wandb.Image(img, caption=image_caption)]}) 
+            
+    def noise_images_plotting(self, global_model):
+        self.model.load_state_dict(global_model, strict=False)
+        self.model.eval()
+        
+        dataset_key = list(self.test_data_dict.keys())[0]
+        x_ = (next(iter(self.test_data_dict[dataset_key]))[0]).to(self.device)
+        x = (x_ * 2) - 1
+        task_name = 'noisy_images'
+        image_caption_base = f"{dataset_key}_{str(self.model.inference_scheduler)[:4].lower()}"
+
+        with torch.no_grad():
+            noise_levels = list(np.arange(0, self.model.train_scheduler.num_train_timesteps, 100))
+            img_noisy_list = []
+            for noise_level_recon in noise_levels:
+                noise = generate_noise(self.model.train_scheduler.noise_type, x_, noise_level_recon)
+                img_noisy = self.model.train_scheduler.add_noise(original_samples=x, noise=noise, timesteps=torch.tensor([noise_level_recon], device=self.device))
+                img_noisy = self._normalize_per_image(img_noisy)
+                img_noisy_list.append(img_noisy)
+            img_noisy_ = torch.stack([x_] + img_noisy_list) # (S, B, C, H, W)
+            img_noisy_tovis = img_noisy_.permute(1,0,2,3,4)  # (B, S, C, H, W)
+            x_labels = ['x'] + [f'step_{i}' for i in noise_levels]
+            y_labels = ["sample_" + str(i) for i in range(x.shape[0])]
+            self._batch_visualization(task_name, f"{image_caption_base}_{self.model.train_scheduler.noise_type}_noisy_images", x_labels, y_labels, img_noisy_tovis.detach().cpu())                          
+ 
+
+    def _normalize_per_image(self,x):
+        # x: [B, 1, H, W]
+        B = x.shape[0]
+        x_flat = x.view(B, -1)
+
+        min_val = x_flat.min(dim=1)[0].view(B,1,1,1)
+        max_val = x_flat.max(dim=1)[0].view(B,1,1,1)
+
+        x_norm = (x - min_val) / (max_val - min_val + 1e-8)
+        return x_norm
+
+    def _log_visualization(self, to_visualize, i, count, task_name, dataset_key):
         """
         Helper function to log images and masks to wandb
         :param: to_visualize: list of dicts of images and their configs to be visualized
@@ -103,7 +363,7 @@ class PDownstreamEvaluator(DownstreamEvaluator):
             axarr[idx].imshow(tensor, cmap=dict.get('cmap', 'gray'), vmin=dict.get('vmin', 0), vmax=dict.get('vmax', 1))
         diffp.set_size_inches(len(to_visualize) * 4, 4)
 
-        wandb.log({f'Anomaly_masks/Example_Atlas_{count}': [wandb.Image(diffp, caption="Atlas_" + str(count))]})
+        wandb.log({f'{task_name}/Example_{dataset_key}_{count}': [wandb.Image(diffp, caption=f"{dataset_key}_{count}")]})
 
 
     def find_mask_size_thresholds(self, dataset):
@@ -207,7 +467,7 @@ class PDownstreamEvaluator(DownstreamEvaluator):
                         # Example visualizations
                         if int(count) % 10 == 0 or int(count) in [0, 66, 325, 352, 545, 548, 231, 609, 616, 11, 254,
                                                                   539, 165, 545, 550, 92, 616, 628, 630, 636, 651]:
-                            self._log_visualization(to_visualize, i, count)
+                            self._log_visualization(to_visualize, i, count, task_name='Anomaly_masks', dataset_key=dataset_key)
 
                         x_i = x[i][0]
                         rec_2_i = x_rec[i][0]
@@ -313,22 +573,24 @@ class PDownstreamEvaluator(DownstreamEvaluator):
                 x_rec = x_rec_dict['x_rec'] if 'x_rec' in x_rec_dict.keys() else torch.zeros_like(x)
                 x_rec = torch.clamp(x_rec, 0, 1)
 
+                # TODO: add one anomaly map of difference between input and x_rec
                 to_visualize = [
                     {'title': 'x', 'tensor': x},
                     {'title': 'x_rec', 'tensor': x_rec},
-                    {'title': f'Anomaly  map {anomaly_map.max():.3f}', 'tensor': anomaly_map, 'cmap': 'plasma',
+                    {'title': f'Anomaly_map {anomaly_map.max():.3f}(max)', 'tensor': anomaly_map, 'cmap': 'plasma',
                      'vmax': anomaly_map.max()},
                     {'title': 'gt', 'tensor': masks, 'cmap': 'plasma'}
                 ]
-
+                
                 if 'mask' in x_rec_dict.keys():
-                    masked_input = x_rec_dict['mask'] #+ x
+                    x_ = x.cpu().detach().numpy()
+                    masked_input = x_rec_dict['mask'] + x_
                     masked_input[masked_input>1]=1
 
-                    to_visualize.append({'title': 'Rec Orig', 'tensor': x_rec_dict['x_rec_orig'], 'cmap': 'gray'})
-                    to_visualize.append({'title': 'Res Orig', 'tensor': x_rec_dict['x_res'], 'cmap': 'plasma',
-                                        'vmax': x_rec_dict['x_res'].max()})
-                    to_visualize.append({'title': 'Mask', 'tensor': masked_input, 'cmap': 'plasma', 'vmax': 0.5})
+                    # to_visualize.append({'title': 'Rec Orig', 'tensor': x_rec_dict['x_rec_orig'], 'cmap': 'gray'})
+                    # to_visualize.append({'title': 'Res Orig', 'tensor': x_rec_dict['x_res'], 'cmap': 'plasma',
+                    #                     'vmax': x_rec_dict['x_res'].max()})
+                    to_visualize.append({'title': 'Masked_input', 'tensor': masked_input, 'cmap': 'plasma', 'vmax': 0.5})
 
                 for i in range(len(x)):
                     if torch.sum(masks[i][0]) > threshold_low and torch.sum(
@@ -343,7 +605,7 @@ class PDownstreamEvaluator(DownstreamEvaluator):
                         # Example visualizations
                         if int(count) % 1000 == 0 or int(count) in [3,8,15,17,18,22,81,101,381,440,530,597,598,602,636, 66, 550, 616, 548, 545, 325]: #[0, 66, 325, 352, 545, 548, 231, 609, 616, 11, 254,
                                                                 #   539, 165, 545, 550, 92, 616, 628, 630, 636, 651]:
-                            self._log_visualization(to_visualize, i, count)
+                            self._log_visualization(to_visualize, i, count, task_name='Anomaly_masks', dataset_key=dataset_key)
 
                         x_i = x[i][0]
                         rec_2_i = x_rec[i][0]
