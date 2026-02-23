@@ -171,8 +171,12 @@ class DDPM(nn.Module):
                     wandb.Image(diffp, caption="Iteration_" + str(img_ct))]})
             
 
-    def get_thor_anomaly(self, inputs):
-        x_rec, z_dict = self.sample_from_image_interpol(inputs, noise_level=self.noise_level_recon, save_intermediates=True, intermediate_steps=self.intermediate_steps, t_harmonization=self.t_harmonization, t_visualization=self.t_visualization)
+    def get_thor_anomaly(self, inputs, noise_level=None):
+        # inputs mapped from [0, 1] to [-1, 1] for sampling
+        inputs = (inputs * 2) - 1 
+        if noise_level is None:
+            noise_level = self.noise_level_recon
+        x_rec, z_dict = self.sample_from_image_interpol(inputs, noise_level=noise_level, save_intermediates=True, intermediate_steps=100, t_harmonization=self.t_harmonization, t_visualization=self.t_visualization)
         # self.print_intermediates(z_dict['inter_ddpm'], 'Intermediates (DDPM)', self.img_ct, 1)
         # self.print_intermediates(z_dict['z'], 'Intermediates (THOR)', self.img_ct, 1)
         # self.print_intermediates(z_dict['inter_gt'], 'Intermediates (GT)', self.img_ct, 1)
@@ -180,8 +184,11 @@ class DDPM(nn.Module):
         # self.print_intermediates(z_dict['inter_res_ddpm'], 'Intermediates (Res_DDPM)', self.img_ct, 0.999)
         # self.print_intermediates(z_dict['inter_res_mix'], 'Intermediates (Res_MIX)', self.img_ct, 0.999)
 
+        # inputs and x_rec mapped back from [-1, 1] to [0, 1]
+        x_rec = (x_rec + 1) / 2 
         x_rec = torch.clamp(x_rec, 0, 1)
-
+        inputs = (inputs + 1) / 2 
+        inputs = torch.clamp(inputs, 0, 1)
 
         np_res = [inter.cpu().detach().numpy() for inter in z_dict['inter_res']]
         x_rec_refined = x_rec 
@@ -196,12 +203,23 @@ class DDPM(nn.Module):
                                             'x_rec_orig': x_rec}
     
 
-    def get_anomaly(self, inputs, noise_level=250):
+    def get_anomaly(self, inputs, noise_level=None):
+        if noise_level is None:
+            noise_level = self.noise_level_recon
         if self.inference_type == 'thor':
-            return self.get_thor_anomaly(inputs)
-        x_rec, _ = self.sample_from_image(inputs, self.noise_level_recon)
+            # TODO:  mapped between [-1,1] and [0, 1]
+            return self.get_thor_anomaly(inputs, noise_level=noise_level)
+        # inputs mapped from [0, 1] to [-1, 1] for sampling
+        inputs = (inputs * 2) - 1 
+        x_rec, _ = self.sample_from_image(inputs, noise_level=noise_level)
+        # inputs and x_rec mapped back from [-1, 1] to [0, 1] for anomaly map computation
+        x_rec = (x_rec + 1) / 2 
+        x_rec = torch.clamp(x_rec, 0, 1)
         x_rec_ = x_rec.cpu().detach().numpy()
+        inputs = (inputs + 1) / 2 
+        inputs = torch.clamp(inputs, 0, 1)
         x_ = inputs.cpu().detach().numpy()
+
         anomaly_maps = np.abs(x_ - x_rec_)
         anomaly_scores = np.mean(anomaly_maps, axis=(1, 2, 3), keepdims=True)
         # anomaly_maps, anomaly_score = self.compute_anomaly(inputs, x_rec)
@@ -401,6 +419,11 @@ class DDPM(nn.Module):
             # image_gt, orig_image_gt = self.inference_scheduler.step(model_output_gt, t, noise_gt)
 
             if save_intermediates and (t in t_harmonization or t in t_visualization):
+                # orig_image, inputs mapped from [-1,1] to [0, 1] for anomaly map computation and visualization 
+                orig_image = (orig_image + 1) / 2 
+                orig_image = torch.clamp(orig_image, 0, 1)
+                inputs = (inputs + 1) / 2 
+                inputs = torch.clamp(inputs, 0, 1)
 
                 # intermediates_ddpm.append(orig_image_ddpm)
                 intermediates.append(orig_image)
@@ -423,6 +446,13 @@ class DDPM(nn.Module):
                 intermediates_res.append(res_mix)
                 # intermediates_res_ddpm.append(res_ddpm)
                 intermediates_res_mix.append(((region_anomaly_map)).clip(0,1))
+                
+                # orig_image, inputs mapped back from [0,1] to [-1, 1] after anomaly map computation
+                orig_image = (orig_image * 2) - 1 
+                orig_image = torch.clamp(orig_image, -1, 1)
+                inputs = (inputs * 2) - 1 
+                inputs = torch.clamp(inputs, -1, 1)
+                
             if t in t_harmonization:
 
                 image_0 = res * orig_image + (1-res) * inputs   # orig_image, inputs
